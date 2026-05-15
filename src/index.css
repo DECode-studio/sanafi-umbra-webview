@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply min-h-screen;
+  }
+
+  body {
+    @apply m-0 bg-sanafi-bg text-sanafi-text antialiased;
+    font-family: 'Manrope', 'Space Grotesk', sans-serif;
+  }
+}
