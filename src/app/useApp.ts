@@ -221,8 +221,24 @@ export function useApp() {
             signer: sender,
           } as any;
         },
-        signTransaction: async (tx: any) => tx,
-        signTransactions: async (txs: readonly any[]) => txs as any,
+        signTransaction: async (tx: any) => {
+          const wire = getBase64EncodedWireTransaction(tx);
+          const signed = await bridge.request<{ signedTransactionBase64: string }>('SIGN_TRANSACTION', {
+            transactionBase64: wire,
+            label: 'sign',
+          });
+          // We need to return the transaction object, but @solana/kit versioned txs are usually
+          // handled as wire data or re-deserialized. For Umbra SDK, we can return the wire data
+          // if it expects that, or re-parse it.
+          return base64ToUint8(signed.signedTransactionBase64) as any;
+        },
+        signTransactions: async (txs: readonly any[]) => {
+          const wireTxs = txs.map(tx => getBase64EncodedWireTransaction(tx));
+          const signed = await bridge.request<{ signedTransactionsBase64: string[] }>('SIGN_ALL_TRANSACTIONS', {
+            transactionsBase64: wireTxs,
+          });
+          return signed.signedTransactionsBase64.map(t => base64ToUint8(t)) as any;
+        },
       };
 
       try {
