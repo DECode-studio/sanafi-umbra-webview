@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getBase64EncodedWireTransaction } from '@solana/kit';
+import { getBase64EncodedWireTransaction, getTransactionDecoder } from '@solana/kit';
 import {
   getClaimableUtxoScannerFunction,
   getPublicBalanceToSelfClaimableUtxoCreatorFunction,
@@ -227,17 +227,15 @@ export function useApp() {
             transactionBase64: wire,
             label: 'sign',
           });
-          // We need to return the transaction object, but @solana/kit versioned txs are usually
-          // handled as wire data or re-deserialized. For Umbra SDK, we can return the wire data
-          // if it expects that, or re-parse it.
-          return base64ToUint8(signed.signedTransactionBase64) as any;
+          const signedWire = base64ToUint8(signed.signedTransactionBase64);
+          return getTransactionDecoder().decode(signedWire) as any;
         },
         signTransactions: async (txs: readonly any[]) => {
           const wireTxs = txs.map(tx => getBase64EncodedWireTransaction(tx));
           const signed = await bridge.request<{ signedTransactionsBase64: string[] }>('SIGN_ALL_TRANSACTIONS', {
             transactionsBase64: wireTxs,
           });
-          return signed.signedTransactionsBase64.map(t => base64ToUint8(t)) as any;
+          return signed.signedTransactionsBase64.map(t => getTransactionDecoder().decode(base64ToUint8(t))) as any;
         },
       };
 
