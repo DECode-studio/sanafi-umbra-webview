@@ -302,7 +302,7 @@ export function useApp() {
 
         emitProgress('SCAN', 'STARTED', 'Scanning claimable UTXOs');
         const scanner = getClaimableUtxoScannerFunction({ client });
-        const scanResult: any = await scanner(0 as any, 0 as any);
+        const scanResult: any = await scanner(0n as any, 0n as any);
         emitProgress('SCAN', 'SUCCESS', 'Scan completed');
 
         const claimSigs: string[] = [];
@@ -342,6 +342,10 @@ export function useApp() {
       } catch (error: any) {
         setFlowOutcome('FAILED');
         setStatusLabel('Transaction failed.');
+        console.error('[UMBRA_WEBVIEW_FLOW_ERROR]', {
+          message: error?.message,
+          stack: error?.stack,
+        });
         bridge.emit('FLOW_ERROR', {
           step: 'DONE',
           code: 'UMBRA_FLOW_FAILED',
