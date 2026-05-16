@@ -93,6 +93,7 @@ const sleep = (ms: number) => new Promise((resolve) => {
 });
 
 const CLAIMED_UTXO_CACHE_KEY = 'sanafi_umbra_claimed_utxo_keys_v1';
+const SCAN_CURSORS_STORAGE_KEY = 'sanafi_umbra_scan_cursors_v1';
 
 function getUtxoKey(utxo: any): string | null {
   if (!utxo || typeof utxo !== 'object') return null;
@@ -118,6 +119,30 @@ function writeClaimedUtxoKeys(keys: Set<string>) {
   try {
     const arr = Array.from(keys).slice(-500);
     window.localStorage.setItem(CLAIMED_UTXO_CACHE_KEY, JSON.stringify(arr));
+  } catch {
+    // no-op
+  }
+}
+
+function readScanCursors(): Record<string, string> {
+  try {
+    const raw = window.localStorage.getItem(SCAN_CURSORS_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return {};
+    return parsed as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+function writeScanCursors(cursors: Record<string, bigint>) {
+  try {
+    const serializable: Record<string, string> = {};
+    Object.entries(cursors).forEach(([k, v]) => {
+      serializable[k] = v.toString();
+    });
+    window.localStorage.setItem(SCAN_CURSORS_STORAGE_KEY, JSON.stringify(serializable));
   } catch {
     // no-op
   }
@@ -349,11 +374,17 @@ export function useApp() {
         const treeIndexes = [0n, 1n, 2n];
         const chunkSize = 5000n;
         const maxRoundsPerTree = 8;
+        const lookbackChunks = 2n;
+        const storedCursorMap = readScanCursors();
+        const nextCursorMap: Record<string, bigint> = {};
 
         for (let attempt = 1; attempt <= maxScanAttempts; attempt += 1) {
           const allSelfBurnable: any[] = [];
           for (const treeIndex of treeIndexes) {
-            let cursor = 0n;
+            const treeKey = treeIndex.toString();
+            const storedCursor = storedCursorMap[treeKey] ? BigInt(storedCursorMap[treeKey]) : 0n;
+            const lookback = chunkSize * lookbackChunks;
+            let cursor = storedCursor > lookback ? storedCursor - lookback : 0n;
             for (let round = 0; round < maxRoundsPerTree; round += 1) {
               const end = cursor + chunkSize;
               const results: any = await scanner(treeIndex as any, cursor as any, end as any);
@@ -367,6 +398,7 @@ export function useApp() {
                 break;
               }
               cursor = BigInt(nextCursor);
+              nextCursorMap[treeKey] = cursor;
             }
           }
 
@@ -394,6 +426,7 @@ export function useApp() {
             emitProgress('SCAN', 'SUCCESS', 'Scan completed but no claimable UTXO found yet');
           }
         }
+        writeScanCursors(nextCursorMap);
 
         const claimSigs: string[] = [];
         if ((scanResult?.selfBurnable || []).length > 0) {
