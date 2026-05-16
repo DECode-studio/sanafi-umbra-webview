@@ -65,6 +65,13 @@ function parseAllowedOrigins(rawOrigins?: string[]): Set<string> {
   return result;
 }
 
+function safeStringify(value: unknown): string {
+  return JSON.stringify(value, (_key, v) => {
+    if (typeof v === 'bigint') return v.toString();
+    return v;
+  });
+}
+
 export function createSanafiUmbraBridge(config?: BridgeInitConfig): SanafiUmbraBridgeApi {
   const pending = new Map<string, PendingRequest>();
   const listeners = new Map<string, Set<Listener>>();
@@ -83,7 +90,7 @@ export function createSanafiUmbraBridge(config?: BridgeInitConfig): SanafiUmbraB
   };
 
   const send = (envelope: BridgeEnvelope) => {
-    const serialized = JSON.stringify(envelope);
+    const serialized = safeStringify(envelope);
     if (window.ReactNativeWebView?.postMessage) {
       window.ReactNativeWebView.postMessage(serialized);
       return;
