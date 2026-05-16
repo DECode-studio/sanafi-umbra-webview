@@ -87,6 +87,10 @@ function validateStartPayload(payload: unknown): { valid: true; data: StartPriva
   return { valid: true, data: p as StartPrivateFlowPayload };
 }
 
+const sleep = (ms: number) => new Promise((resolve) => {
+  setTimeout(resolve, ms);
+});
+
 export function useApp() {
   const [bridgeReady, setBridgeReady] = useState(false);
   const [lastEvent, setLastEvent] = useState('No event yet');
@@ -305,8 +309,23 @@ export function useApp() {
 
         emitProgress('SCAN', 'STARTED', 'Scanning claimable UTXOs');
         const scanner = getClaimableUtxoScannerFunction({ client });
-        const scanResult: any = await scanner(0n as any, 0n as any);
-        emitProgress('SCAN', 'SUCCESS', 'Scan completed');
+        let scanResult: any = null;
+        const maxScanAttempts = 6;
+        for (let attempt = 1; attempt <= maxScanAttempts; attempt += 1) {
+          scanResult = await scanner(0n as any, 0n as any);
+          const burnableCount = Array.isArray(scanResult?.selfBurnable) ? scanResult.selfBurnable.length : 0;
+          if (burnableCount > 0) {
+            emitProgress('SCAN', 'SUCCESS', `Scan found ${burnableCount} claimable UTXO(s) on attempt ${attempt}/${maxScanAttempts}`);
+            break;
+          }
+
+          if (attempt < maxScanAttempts) {
+            emitProgress('SCAN', 'STARTED', `No claimable UTXO yet, retrying scan (${attempt}/${maxScanAttempts})`);
+            await sleep(1500 * attempt);
+          } else {
+            emitProgress('SCAN', 'SUCCESS', 'Scan completed but no claimable UTXO found yet');
+          }
+        }
 
         const claimSigs: string[] = [];
         if ((scanResult?.selfBurnable || []).length > 0) {
@@ -322,6 +341,8 @@ export function useApp() {
           const relayerSigs = Array.isArray(claimResult?.signatures) ? claimResult.signatures : [];
           claimSigs.push(...relayerSigs);
           emitProgress('BUILD_CLAIM', 'SUCCESS', 'Claim-all completed');
+        } else {
+          emitProgress('BUILD_CLAIM', 'SUCCESS', 'No claimable UTXO available yet. Claim step skipped.');
         }
 
         emitProgress('DONE', 'SUCCESS', 'Private flow completed');
