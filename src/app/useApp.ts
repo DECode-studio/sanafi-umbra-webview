@@ -209,6 +209,8 @@ export function useApp() {
         return response.signatures || [];
       };
 
+      let forwardingPhase: 'create' | 'claim' = 'create';
+
       const walletBridgeSigner = {
         address: sender,
         signMessage: async (message: Uint8Array) => {
@@ -255,24 +257,24 @@ export function useApp() {
                 const signed: string[] = [];
                 for (const tx of transactions) {
                   const wire = getBase64EncodedWireTransaction(tx as any);
-                  signed.push(await signOneTx(wire, 'create'));
+                  signed.push(await signOneTx(wire, forwardingPhase));
                 }
-                return broadcastSigned(signed, 'create');
+                return broadcastSigned(signed, forwardingPhase);
               },
               forwardSequentially: async (transactions: readonly any[]) => {
                 const signatures: string[] = [];
                 for (const tx of transactions) {
                   const wire = getBase64EncodedWireTransaction(tx as any);
-                  const signed = await signOneTx(wire, 'create');
-                  const [sig] = await broadcastSigned([signed], 'create');
+                  const signed = await signOneTx(wire, forwardingPhase);
+                  const [sig] = await broadcastSigned([signed], forwardingPhase);
                   if (sig) signatures.push(sig);
                 }
                 return signatures;
               },
               fireAndForget: async (transaction: any) => {
                 const wire = getBase64EncodedWireTransaction(transaction as any);
-                const signed = await signOneTx(wire, 'create');
-                const [sig] = await broadcastSigned([signed], 'create');
+                const signed = await signOneTx(wire, forwardingPhase);
+                const [sig] = await broadcastSigned([signed], forwardingPhase);
                 return sig ?? '';
               },
             } as any,
@@ -291,6 +293,7 @@ export function useApp() {
         emitProgress('REGISTER', 'SUCCESS', 'Sender registration ready');
 
         emitProgress('BUILD_CREATE', 'STARTED', 'Building create private UTXO');
+        forwardingPhase = 'create';
         const createProver = getCreateSelfClaimableUtxoFromPublicBalanceProver();
         const createUtxo = getPublicBalanceToSelfClaimableUtxoCreatorFunction({ client }, { zkProver: createProver });
         const createResult: any = await withRetry(() => createUtxo({
@@ -308,6 +311,7 @@ export function useApp() {
         const claimSigs: string[] = [];
         if ((scanResult?.selfBurnable || []).length > 0) {
           emitProgress('BUILD_CLAIM', 'STARTED', 'Building claim-all transaction');
+          forwardingPhase = 'claim';
           const claimProver = getClaimSelfClaimableUtxoIntoPublicBalanceProver();
           const relayer = getUmbraRelayer({ apiEndpoint: relayerApiEndpoint });
           const claimAll = getSelfClaimableUtxoToPublicBalanceClaimerFunction(
