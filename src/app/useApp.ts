@@ -341,11 +341,44 @@ export function useApp() {
 
         emitProgress('SCAN', 'STARTED', 'Scanning claimable UTXOs');
         const scanner = getClaimableUtxoScannerFunction({ client });
-        let scanResult: any = null;
-        const maxScanAttempts = 6;
+        let scanResult: any = { selfBurnable: [] };
+        const maxScanAttempts = 4;
+        const treeIndexes = [0n, 1n, 2n];
+        const chunkSize = 5000n;
+        const maxRoundsPerTree = 8;
+
         for (let attempt = 1; attempt <= maxScanAttempts; attempt += 1) {
-          scanResult = await scanner(0n as any, 0n as any);
-          const burnableCount = Array.isArray(scanResult?.selfBurnable) ? scanResult.selfBurnable.length : 0;
+          const allSelfBurnable: any[] = [];
+          for (const treeIndex of treeIndexes) {
+            let cursor = 0n;
+            for (let round = 0; round < maxRoundsPerTree; round += 1) {
+              const end = cursor + chunkSize;
+              const results: any = await scanner(treeIndex as any, cursor as any, end as any);
+
+              if (Array.isArray(results?.selfBurnable) && results.selfBurnable.length > 0) {
+                allSelfBurnable.push(...results.selfBurnable);
+              }
+
+              const nextCursor = results?.nextScanStartIndex;
+              if (nextCursor === undefined || nextCursor === null || nextCursor === cursor) {
+                break;
+              }
+              cursor = BigInt(nextCursor);
+            }
+          }
+
+          const unique = new Map<string, any>();
+          for (const utxo of allSelfBurnable) {
+            const key = getUtxoKey(utxo) || JSON.stringify({
+              leafIndex: utxo?.leafIndex,
+              treeIndex: utxo?.treeIndex,
+              commitment: utxo?.commitment,
+            });
+            unique.set(key, utxo);
+          }
+          scanResult = { selfBurnable: Array.from(unique.values()) };
+
+          const burnableCount = scanResult.selfBurnable.length;
           if (burnableCount > 0) {
             emitProgress('SCAN', 'SUCCESS', `Scan found ${burnableCount} claimable UTXO(s) on attempt ${attempt}/${maxScanAttempts}`);
             break;
@@ -353,7 +386,7 @@ export function useApp() {
 
           if (attempt < maxScanAttempts) {
             emitProgress('SCAN', 'STARTED', `No claimable UTXO yet, retrying scan (${attempt}/${maxScanAttempts})`);
-            await sleep(1500 * attempt);
+            await sleep(2000 * attempt);
           } else {
             emitProgress('SCAN', 'SUCCESS', 'Scan completed but no claimable UTXO found yet');
           }
