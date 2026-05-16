@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { getBase64EncodedWireTransaction, getTransactionDecoder } from '@solana/kit';
 import {
+  getBatchMerkleProofFetcher,
   getClaimableUtxoScannerFunction,
   getPublicBalanceToSelfClaimableUtxoCreatorFunction,
   getSelfClaimableUtxoToPublicBalanceClaimerFunction,
@@ -90,6 +91,37 @@ function validateStartPayload(payload: unknown): { valid: true; data: StartPriva
 const sleep = (ms: number) => new Promise((resolve) => {
   setTimeout(resolve, ms);
 });
+
+const CLAIMED_UTXO_CACHE_KEY = 'sanafi_umbra_claimed_utxo_keys_v1';
+
+function getUtxoKey(utxo: any): string | null {
+  if (!utxo || typeof utxo !== 'object') return null;
+  const treeIndex = utxo?.treeIndex ?? utxo?.tree_id ?? utxo?.tree;
+  const leafIndex = utxo?.leafIndex ?? utxo?.leaf_index ?? utxo?.index;
+  if (treeIndex === undefined || leafIndex === undefined) return null;
+  return `${String(treeIndex)}:${String(leafIndex)}`;
+}
+
+function readClaimedUtxoKeys(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(CLAIMED_UTXO_CACHE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((v) => typeof v === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeClaimedUtxoKeys(keys: Set<string>) {
+  try {
+    const arr = Array.from(keys).slice(-500);
+    window.localStorage.setItem(CLAIMED_UTXO_CACHE_KEY, JSON.stringify(arr));
+  } catch {
+    // no-op
+  }
+}
 
 export function useApp() {
   const [bridgeReady, setBridgeReady] = useState(false);
@@ -333,14 +365,38 @@ export function useApp() {
           forwardingPhase = 'claim';
           const claimProver = getClaimSelfClaimableUtxoIntoPublicBalanceProver();
           const relayer = getUmbraRelayer({ apiEndpoint: relayerApiEndpoint });
-          const claimAll = getSelfClaimableUtxoToPublicBalanceClaimerFunction(
+          const fetchBatchMerkleProof = getBatchMerkleProofFetcher({ apiEndpoint: indexerApiEndpoint });
+          const claimOne = getSelfClaimableUtxoToPublicBalanceClaimerFunction(
             { client },
-            { zkProver: claimProver, relayer } as any,
+            { zkProver: claimProver, relayer, fetchBatchMerkleProof } as any,
           );
-          const claimResult: any = await claimAll(scanResult.selfBurnable as any);
-          const relayerSigs = Array.isArray(claimResult?.signatures) ? claimResult.signatures : [];
-          claimSigs.push(...relayerSigs);
-          emitProgress('BUILD_CLAIM', 'SUCCESS', 'Claim-all completed');
+          const claimedCache = readClaimedUtxoKeys();
+          const claimablesRaw = Array.isArray(scanResult.selfBurnable) ? scanResult.selfBurnable : [];
+          const claimables = claimablesRaw.filter((utxo: any) => {
+            const key = getUtxoKey(utxo);
+            return key ? !claimedCache.has(key) : true;
+          });
+
+          for (let i = 0; i < claimables.length; i += 1) {
+            const utxo = claimables[i];
+            emitProgress('BUILD_CLAIM', 'STARTED', `Claiming UTXO ${i + 1}/${claimables.length}`);
+            const claimResult: any = await claimOne([utxo] as any);
+            const batchSigs = Array.from(claimResult?.batches?.values?.() ?? [])
+              .map((b: any) => b?.txSignature)
+              .filter(Boolean);
+            const directSigs = Array.isArray(claimResult?.signatures) ? claimResult.signatures.filter(Boolean) : [];
+            const merged = [...batchSigs, ...directSigs];
+            if (merged.length === 0) {
+              throw new Error(`Claim ${i + 1} succeeded but signature was not returned.`);
+            }
+            claimSigs.push(...merged);
+            const key = getUtxoKey(utxo);
+            if (key) {
+              claimedCache.add(key);
+            }
+          }
+          writeClaimedUtxoKeys(claimedCache);
+          emitProgress('BUILD_CLAIM', 'SUCCESS', `Claim-all completed (${claimSigs.length} signature(s))`);
         } else {
           emitProgress('BUILD_CLAIM', 'SUCCESS', 'No claimable UTXO available yet. Claim step skipped.');
         }
