@@ -339,6 +339,9 @@ export function useApp() {
         }), 2);
         emitProgress('BUILD_CREATE', 'SUCCESS', 'Private UTXO created');
 
+        emitProgress('SCAN', 'STARTED', 'Waiting 15s for indexer synchronization...');
+        await sleep(15000);
+
         emitProgress('SCAN', 'STARTED', 'Scanning claimable UTXOs');
         const scanner = getClaimableUtxoScannerFunction({ client });
         let scanResult: any = { selfBurnable: [] };
