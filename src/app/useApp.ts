@@ -369,7 +369,7 @@ export function useApp() {
 
         emitProgress('SCAN', 'STARTED', 'Scanning claimable UTXOs');
         const scanner = getClaimableUtxoScannerFunction({ client });
-        let scanResult: any = { selfBurnable: [] };
+        let scanResult: any = { selfBurnable: [], publicSelfBurnable: [] };
         const maxScanAttempts = 4;
         const treeIndexes = [0n, 1n, 2n];
         const chunkSize = 5000n;
@@ -380,6 +380,7 @@ export function useApp() {
 
         for (let attempt = 1; attempt <= maxScanAttempts; attempt += 1) {
           const allSelfBurnable: any[] = [];
+          const allPublicSelfBurnable: any[] = [];
           for (const treeIndex of treeIndexes) {
             const treeKey = treeIndex.toString();
             const storedCursor = storedCursorMap[treeKey] ? BigInt(storedCursorMap[treeKey]) : 0n;
@@ -391,6 +392,9 @@ export function useApp() {
 
               if (Array.isArray(results?.selfBurnable) && results.selfBurnable.length > 0) {
                 allSelfBurnable.push(...results.selfBurnable);
+              }
+              if (Array.isArray(results?.publicSelfBurnable) && results.publicSelfBurnable.length > 0) {
+                allPublicSelfBurnable.push(...results.publicSelfBurnable);
               }
 
               const nextCursor = results?.nextScanStartIndex;
@@ -411,9 +415,21 @@ export function useApp() {
             });
             unique.set(key, utxo);
           }
-          scanResult = { selfBurnable: Array.from(unique.values()) };
+          const uniquePublic = new Map<string, any>();
+          for (const utxo of allPublicSelfBurnable) {
+            const key = getUtxoKey(utxo) || JSON.stringify({
+              leafIndex: utxo?.leafIndex,
+              treeIndex: utxo?.treeIndex,
+              commitment: utxo?.commitment,
+            });
+            uniquePublic.set(key, utxo);
+          }
+          scanResult = {
+            selfBurnable: Array.from(unique.values()),
+            publicSelfBurnable: Array.from(uniquePublic.values()),
+          };
 
-          const burnableCount = scanResult.selfBurnable.length;
+          const burnableCount = scanResult.selfBurnable.length + scanResult.publicSelfBurnable.length;
           if (burnableCount > 0) {
             emitProgress('SCAN', 'SUCCESS', `Scan found ${burnableCount} claimable UTXO(s) on attempt ${attempt}/${maxScanAttempts}`);
             break;
@@ -429,7 +445,7 @@ export function useApp() {
         writeScanCursors(nextCursorMap);
 
         const claimSigs: string[] = [];
-        if ((scanResult?.selfBurnable || []).length > 0) {
+        if (((scanResult?.selfBurnable || []).length + (scanResult?.publicSelfBurnable || []).length) > 0) {
           emitProgress('BUILD_CLAIM', 'STARTED', 'Building claim-all transaction');
           forwardingPhase = 'claim';
           const claimProver = getClaimSelfClaimableUtxoIntoPublicBalanceProver();
@@ -440,7 +456,10 @@ export function useApp() {
             { zkProver: claimProver, relayer, fetchBatchMerkleProof } as any,
           );
           const claimedCache = readClaimedUtxoKeys();
-          const claimablesRaw = Array.isArray(scanResult.selfBurnable) ? scanResult.selfBurnable : [];
+          const claimablesRaw = [
+            ...(Array.isArray(scanResult.selfBurnable) ? scanResult.selfBurnable : []),
+            ...(Array.isArray(scanResult.publicSelfBurnable) ? scanResult.publicSelfBurnable : []),
+          ];
           const claimables = claimablesRaw.filter((utxo: any) => {
             const key = getUtxoKey(utxo);
             return key ? !claimedCache.has(key) : true;
