@@ -103,6 +103,13 @@ function getUtxoKey(utxo: any): string | null {
   return `${String(treeIndex)}:${String(leafIndex)}`;
 }
 
+function getSafeUtxoFallbackKey(utxo: any): string {
+  const leafIndex = utxo?.leafIndex ?? utxo?.leaf_index ?? utxo?.index;
+  const treeIndex = utxo?.treeIndex ?? utxo?.tree_id ?? utxo?.tree;
+  const commitment = utxo?.commitment ?? '';
+  return `leaf:${String(leafIndex)}|tree:${String(treeIndex)}|commitment:${String(commitment)}`;
+}
+
 function readClaimedUtxoKeys(): Set<string> {
   try {
     const raw = window.localStorage.getItem(CLAIMED_UTXO_CACHE_KEY);
@@ -408,20 +415,12 @@ export function useApp() {
 
           const unique = new Map<string, any>();
           for (const utxo of allSelfBurnable) {
-            const key = getUtxoKey(utxo) || JSON.stringify({
-              leafIndex: utxo?.leafIndex,
-              treeIndex: utxo?.treeIndex,
-              commitment: utxo?.commitment,
-            });
+            const key = getUtxoKey(utxo) || getSafeUtxoFallbackKey(utxo);
             unique.set(key, utxo);
           }
           const uniquePublic = new Map<string, any>();
           for (const utxo of allPublicSelfBurnable) {
-            const key = getUtxoKey(utxo) || JSON.stringify({
-              leafIndex: utxo?.leafIndex,
-              treeIndex: utxo?.treeIndex,
-              commitment: utxo?.commitment,
-            });
+            const key = getUtxoKey(utxo) || getSafeUtxoFallbackKey(utxo);
             uniquePublic.set(key, utxo);
           }
           scanResult = {
